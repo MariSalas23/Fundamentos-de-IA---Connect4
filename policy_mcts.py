@@ -5,7 +5,6 @@ import numpy as np
 from connect4.policy import Policy
 from connect4.connect_state import ConnectState
 
-
 class MctsUcbPolicy(Policy):
     """
     Agente de Conecta 4 con:
@@ -40,7 +39,7 @@ class MctsUcbPolicy(Policy):
         # tabla de valores aprendida
         self.value_table: dict[str, float] = {}
 
-        # timeout opcional (Gradescope puede pasar algo aquí)
+        # timeout opcional
         self.timeout: float | None = None
 
     # ------------------------- UTIL -------------------------
