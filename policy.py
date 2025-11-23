@@ -1,297 +1,237 @@
-import math
+import os
 import json
 import numpy as np
 
 from connect4.policy import Policy
-from connect4.connect_state import ConnectState
 
+def columnas_validas(tablero: np.ndarray, num_columnas: int) -> list[int]:
+    ''' Se recorre cada columna del tablero y se verifica cuáles todavía permiten colocar
+    una ficha. Para eso, se observa la casilla de la fila superior (fila 0) en cada
+    columna. Si en esa posición todavía hay un cero, significa que en esa columna
+    aún cabe al menos una ficha más en alguna fila inferior, así que se considera
+    una columna válida para jugar '''
 
-class MctsUcbPolicy(Policy):
-    """
-    Agente de Conecta 4 con:
+    columnas_libres: list[int] = []
+    for indice_columna in range(num_columnas):
+        if tablero[0, indice_columna] == 0:
+            columnas_libres.append(indice_columna)
 
-    - MCTS + UCB1 para planear en cada jugada.
-    - Tabla de valores (values.json) como PRIOR SUAVE aprendida por self-play.
+    return columnas_libres
 
-    Diseño:
-      * Dentro de la partida:
-          Q(s,a) se estima con Monte Carlo Tree Search (MCTS):
-          selección UCB1 → expansión → simulación (rollout) → backup.
-      * Entre partidas:
-          values.json guarda una tabla de valores V(s) aprendida en train.py.
-          Esos valores se usan como "visitas virtuales" para los nodos
-          cuyo estado ya se ha visto en entrenamiento.
+def simular_caida(tablero: np.ndarray, columna: int, jugador: int, num_filas: int) -> np.ndarray | None:
+    ''' Se simula lo que ocurre si se deja caer una ficha en una columna concreta.
+    La idea es buscar desde la parte de abajo del tablero hacia arriba la primera
+    casilla libre en esa columna. Si se encuentra una posición vacía, se crea una
+    copia del tablero y se coloca allí la ficha del jugador indicado. Si en cambio
+    la columna ya está completamente llena, no se puede hacer ninguna jugada en
+    esa columna y se devuelve None. '''
 
-      * Para no romper el tiempo límite de Gradescope:
-          - n_simulations moderado (120).
-          - Rollouts ligeros, solo con sesgo al centro.
-          - Sin heurística pesada en los rollouts.
-    """
+    fila_objetivo = -1
+    fila = num_filas - 1
+    while fila >= 0:
+        if tablero[fila, columna] == 0:
+            fila_objetivo = fila
+            break
+        fila -= 1
+
+    # Si no se encontró ninguna fila libre, la columna está llena.
+    if fila_objetivo < 0:
+
+        return None
+
+    nuevo_tablero = tablero.copy()
+    nuevo_tablero[fila_objetivo, columna] = jugador
+
+    return nuevo_tablero
+
+def cuatro_en_linea(tablero: np.ndarray, jugador: int, num_filas: int, num_columnas: int) -> bool: 
+    ''' Se verifica si un jugador ha conseguido colocar cuatro fichas consecutivas
+    en alguna dirección. Se revisan todas las posibles alineaciones horizontales,
+    verticales y diagonales. Si se encuentra una secuencia de cuatro posiciones
+    contiguas que pertenecen al mismo jugador, se considera que hay un conecta cuatro. '''
+
+    # Comprobación horizontal: se fija una fila y se miran grupos de cuatro celdas contiguas.
+    for f in range(num_filas):
+        for c in range(num_columnas - 3):
+            if np.all(tablero[f, c:c + 4] == jugador):
+
+                return True
+
+    # Comprobación vertical: se fija una columna y se revisan segmentos de cuatro filas seguidas.
+    for f in range(num_filas - 3):
+        for c in range(num_columnas):
+            if np.all(tablero[f:f + 4, c] == jugador):
+
+                return True
+
+    # Comprobación diagonal principal: se revisan diagonales que avanzan hacia abajo y a la derecha.
+    for f in range(num_filas - 3):
+        for c in range(num_columnas - 3):
+            valido = True
+            for d in range(4):
+                if tablero[f + d, c + d] != jugador:
+                    valido = False
+                    break
+            if valido:
+
+                return True
+
+    # Comprobación diagonal secundaria: se revisan diagonales que avanzan hacia abajo y a la izquierda.
+    for f in range(num_filas - 3):
+        for c in range(num_columnas - 3):
+            valido = True
+            for d in range(4):
+                if tablero[f + 3 - d, c + d] != jugador:
+                    valido = False
+                    break
+            if valido:
+
+                return True
+
+    # Si no se encuentra ninguna alineación de cuatro fichas, no hay conecta cuatro.
+    return False
+
+def turno_actual(tablero: np.ndarray) -> int:
+    ''' Se determina de quién es el turno observando cuántas fichas hay colocadas ya
+    en el tablero. Como el juego empieza con el jugador -1, se utiliza la paridad
+    del número de fichas: si la cantidad de fichas es par, le corresponde mover a -1;
+    si es impar, le corresponde mover a 1. '''
+    
+    cantidad = int(np.count_nonzero(tablero))
+    
+    return -1 if cantidad % 2 == 0 else 1
+
+def codificar_posicion(tablero: np.ndarray) -> str:
+    ''' Se construye una representación textual del estado para poder usarlo como clave
+    dentro de la Q-table. La clave combina el jugador al que le toca mover con el
+    contenido completo del tablero aplanado en una sola cadena. De esta forma, el
+    mismo tablero con otro jugador en turno se considera un estado distinto.'''
+
+    jugador = turno_actual(tablero)
+    plano = tablero.flatten()
+    representacion = "".join(str(int(celda)) for celda in plano)
+
+    return f"{jugador}|" + representacion
+
+class CetinaSalasSabogal(Policy):
+
+    # Se definen las dimensiones estándar del tablero de Conecta 4 y el nombre del archivo donde se almacena la Q-table entrenada.
+    FILAS: int = 6
+    COLUMNAS: int = 7
+    ARCHIVO_MODELO: str = "connect4_model.json"
 
     def __init__(self) -> None:
-        # simulaciones de MCTS por jugada (ajustable)
-        self.n_simulations: int = 120
+        # En este diccionario se guarda la tabla Q una vez se ha cargado desde disco.
+        self._q: dict[str, dict[int, float]] = {}
 
-        # constante de exploración UCB1
-        self.c_ucb: float = math.sqrt(2.0)
+    def mount(self, time_out: float | None = None) -> None:
+        ''' Se ejecuta antes de que empiece la partida. El objetivo principal es intentar
+        cargar desde el archivo JSON la Q-table que se haya generado durante el entrenamiento.
+        Si por cualquier motivo el archivo no existe o no es válido, se inicializa
+        una tabla vacía y el agente se comporta solo con su lógica táctica y heurística. '''
+        
+        ruta = self.ARCHIVO_MODELO
 
-        # RNG
-        self.rng = np.random.default_rng()
+        # Si el archivo no está presente, no se intenta leer nada y se deja la Q-table vacía.
+        if not os.path.exists(ruta):
+            self._q = {}
+            return
 
-        # tabla de valores aprendida
-        self.value_table: dict[str, float] = {}
-
-        # timeout opcional (Gradescope puede pasar algo aquí)
-        self.timeout: float | None = None
-
-    # ------------------------- UTIL -------------------------
-
-    @staticmethod
-    def _state_key(board: np.ndarray, player: int) -> str:
-        """
-        Serializa (tablero, jugador) en una clave de texto para usar en values.json.
-        Debe ser consistente con la función de entrenamiento en train.py.
-        """
-        flat = "".join(str(int(x)) for x in board.flatten())
-        return f"{player}|{flat}"
-
-    # ------------------------- MOUNT -------------------------
-
-    def mount(self, timeout: float | None = None) -> None:
-        """
-        Se llama al inicio de cada partida.
-
-        Gradescope la llama como mount(POLICY_ACTION_TIMEOUT), así que
-        hay que aceptar un parámetro opcional.
-
-        - timeout: tiempo máximo (en segundos) que debería usar act().
-                   Aquí lo guardamos por si se quiere ajustar n_simulations.
-        """
-        self.rng = np.random.default_rng()
-        self.timeout = timeout
-
-        # si el timeout es muy pequeño, reducimos simulaciones
-        if self.timeout is not None and self.timeout < 0.5:
-            self.n_simulations = 60
-        else:
-            self.n_simulations = 120
-
-        # cargar values.json si existe
         try:
-            with open("values.json", "r") as f:
-                content = f.read().strip()
-                self.value_table = json.loads(content) if content else {}
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.value_table = {}
+            with open(ruta, "r", encoding="utf-8") as archivo:
+                contenido = archivo.read().strip()
+                # Si el archivo está vacío, no se realiza ningún procesamiento adicional.
+                if not contenido:
+                    self._q = {}
 
-    # -------------------------- ACT --------------------------
+                    return
+                datos = json.loads(contenido)
+
+            # Se comprueba que el contenido del JSON tenga la forma de un diccionario.
+            if not isinstance(datos, dict):
+                self._q = {}
+
+                return
+
+            tabla_q: dict[str, dict[int, float]] = {}
+
+            # Se recorre cada estado almacenado y se procesan sus acciones asociadas, convirtiendo las claves de texto en enteros y los valores a flotantes.
+            for clave_estado, acciones in datos.items():
+                if not isinstance(acciones, dict):
+                    continue
+
+                acciones_procesadas: dict[int, float] = {}
+                for accion_txt, valor in acciones.items():
+                    try:
+                        accion_int = int(accion_txt)
+                        valor_float = float(valor)
+                    except (TypeError, ValueError):
+                        # Si alguna entrada no se puede interpretar correctamente, se ignora esa acción concreta y se continúa con el resto.
+                        continue
+                    acciones_procesadas[accion_int] = valor_float
+
+                # Solo se guarda el estado si al menos una acción se pudo interpretar bien.
+                if acciones_procesadas:
+                    tabla_q[str(clave_estado)] = acciones_procesadas
+
+            self._q = tabla_q
+
+        except Exception:
+            # Si ocurre cualquier error durante la lectura o el parseo del archivo se prefiere continuar sin Q-table antes que detener el funcionamiento del agente.
+            self._q = {}
 
     def act(self, s: np.ndarray) -> int:
-        """
-        Decide la columna donde jugar a partir del tablero s (6x7).
-        """
+        ''' A partir de un tablero dado, se decide en qué columna se coloca la ficha.
+        Se siguen varios pasos: primero se busca una victoria inmediata, luego se
+        intenta bloquear una posible victoria del rival, después se consulta la Q-table
+        y, si no hay información suficiente, se recurre a una heurística basada en
+        la estructura del tablero (prioridad por las columnas centrales). '''
 
-        # ----- jugador actual y estado raíz -----
-        num_tokens = np.count_nonzero(s)
-        root_player = -1 if num_tokens % 2 == 0 else 1
-        opponent = -root_player
+        # Se crea una copia del tablero de entrada para evitar modificar el original.
+        tablero = np.array(s, dtype=int, copy=True)
+        jugador = turno_actual(tablero)
+        rival = -jugador
 
-        root_state = ConnectState(board=s, player=root_player)
-        legal_actions = root_state.get_free_cols()
-        if not legal_actions:
+        disponibles = columnas_validas(tablero, self.COLUMNAS)
+        # Si no queda ninguna columna disponible, se devuelve una columna por defecto.
+        if not disponibles:
             return 0
 
-        opp_state = ConnectState(board=s, player=opponent)
+        # Primero se comprueba si existe alguna columna disponible en la que, tras colocar una ficha, el jugador actual consiga un conecta cuatro inmediato.
+        for col in disponibles:
+            sim = simular_caida(tablero, col, jugador, self.FILAS)
+            if sim is not None and cuatro_en_linea(sim, jugador, self.FILAS, self.COLUMNAS):
+                return int(col)
 
-        # ================== 1) TÁCTICA INMEDIATA ==================
+        # Se analiza si el rival podría ganar en el siguiente movimiento.
+        for col in disponibles:
+            sim = simular_caida(tablero, col, rival, self.FILAS)
+            if sim is not None and cuatro_en_linea(sim, rival, self.FILAS, self.COLUMNAS):
+                return int(col)
 
-        # 1.a) Ganar en una jugada
-        for c in legal_actions:
-            if root_state.is_applicable(c):
-                nxt = root_state.transition(c)
-                if nxt.is_final() and nxt.get_winner() == root_player:
-                    return c
+        # Se busca escoger la acción con el valor Q más alto entre las columnas legales.
+        if self._q:
+            clave = codificar_posicion(tablero)
+            acciones_estado = self._q.get(clave)
+            if acciones_estado:
+                mejor = None
+                mejor_q = -float("inf")
+                for accion, qvalor in acciones_estado.items():
+                    if accion in disponibles and qvalor > mejor_q:
+                        mejor_q = qvalor
+                        mejor = accion
+                # Si se encuentra una acción con buen valor Q, se devuelve esa columna.
+                if mejor is not None:
+                    return int(mejor)
 
-        # 1.b) Bloquear victoria inmediata del rival
-        for c in legal_actions:
-            if opp_state.is_applicable(c):
-                nxt = opp_state.transition(c)
-                if nxt.is_final() and nxt.get_winner() == opponent:
-                    return c
+        ''' Si la Q-table no aporta información útil para este estado, se recurre a
+        una heurística fija. Esta heurística da prioridad a la columna central
+        y luego a las columnas que están más cerca del centro, ya que suelen ser
+        posiciones más flexibles y potentes en Conecta 4. '''
+        prioridad = (3, 2, 4, 1, 5, 0, 6)
+        for col in prioridad:
+            if col in disponibles:
+                return int(col)
 
-        # ================== 2) MCTS CON PRIORS ==================
-
-        value_table = self.value_table
-        c_ucb = self.c_ucb
-        rng = self.rng
-
-        def make_key(board: np.ndarray, player: int) -> str:
-            return MctsUcbPolicy._state_key(board, player)
-
-        class Node:
-            __slots__ = (
-                "state",
-                "player",
-                "parent",
-                "action_from_parent",
-                "children",
-                "untried_actions",
-                "N",
-                "W",
-            )
-
-            def __init__(
-                self,
-                state: ConnectState,
-                player: int,
-                parent: "Node | None" = None,
-                action_from_parent: int | None = None,
-            ) -> None:
-                self.state = state
-                self.player = player   # jugador al turno en este nodo
-                self.parent = parent
-                self.action_from_parent = action_from_parent
-
-                self.children: dict[int, "Node"] = {}
-                self.untried_actions: list[int] = self.state.get_free_cols()
-
-                # Contadores MCTS
-                self.N: int = 0    # visitas
-                self.W: float = 0  # suma de recompensas
-
-                # ----- PRIOR SUAVE desde values.json -----
-                key = make_key(self.state.board, self.player)
-                if key in value_table:
-                    prior = float(value_table[key])
-                    virtual_N = 2       # pocas visitas virtuales → prior suave
-                    self.N = virtual_N
-                    self.W = prior * virtual_N
-
-            def is_terminal(self) -> bool:
-                return self.state.is_final()
-
-            def is_fully_expanded(self) -> bool:
-                return len(self.untried_actions) == 0
-
-        root = Node(root_state, root_player)
-
-        # -------------------- Selección UCB1 --------------------
-
-        def select_child_ucb(node: Node) -> Node:
-            logN = math.log(max(1, node.N))
-            best_score = -math.inf
-            best_children: list[Node] = []
-
-            for child in node.children.values():
-                if child.N == 0:
-                    ucb = math.inf
-                else:
-                    Q = child.W / child.N
-                    ucb = Q + c_ucb * math.sqrt(logN / child.N)
-
-                if ucb > best_score:
-                    best_score = ucb
-                    best_children = [child]
-                elif ucb == best_score:
-                    best_children.append(child)
-
-            return rng.choice(best_children)
-
-        # -------------------- Rollout policy ligera --------------------
-
-        def rollout_policy(state: ConnectState) -> int:
-            """
-            Política de simulación sencilla:
-            - Elige entre columnas legales.
-            - Sesgo hacia el centro (3,2,4,1,5,0,6).
-            """
-            actions = state.get_free_cols()
-            if not actions:
-                return 0
-
-            pref_order = [3, 2, 4, 1, 5, 0, 6]
-            ordered = [a for a in pref_order if a in actions]
-            if not ordered:
-                ordered = actions
-            return int(rng.choice(ordered))
-
-        # -------------------- Simulación --------------------
-
-        def simulate(node: Node) -> int:
-            sim_state = node.state
-            while not sim_state.is_final():
-                a = rollout_policy(sim_state)
-                if not sim_state.is_applicable(a):
-                    acts = sim_state.get_free_cols()
-                    if not acts:
-                        break
-                    a = acts[0]
-                sim_state = sim_state.transition(a)
-
-            winner = sim_state.get_winner()
-            if winner == 0:
-                return 0
-            return 1 if winner == root_player else -1
-
-        # -------------------- Bucle principal de MCTS --------------------
-
-        for _ in range(self.n_simulations):
-            node = root
-
-            # 1) Selección
-            while (
-                not node.is_terminal()
-                and node.is_fully_expanded()
-                and node.children
-            ):
-                node = select_child_ucb(node)
-
-            # 2) Expansión
-            if not node.is_terminal() and node.untried_actions:
-                a = node.untried_actions.pop()
-                if node.state.is_applicable(a):
-                    ns = node.state.transition(a)
-                    child = Node(
-                        state=ns,
-                        player=ns.player,
-                        parent=node,
-                        action_from_parent=a,
-                    )
-                    node.children[a] = child
-                    node = child
-
-            # 3) Simulación
-            reward = simulate(node)
-
-            # 4) Backpropagation
-            while node is not None:
-                node.N += 1
-                if node.player == root_player:
-                    node.W += reward
-                else:
-                    node.W -= reward
-                node = node.parent
-
-        # ================== 3) ELEGIR ACCIÓN FINAL ==================
-
-        if not root.children:
-            # fallback por seguridad
-            if 3 in legal_actions:
-                return 3
-            return legal_actions[0]
-
-        best_N = -1
-        best_actions: list[int] = []
-
-        for a, child in root.children.items():
-            if child.N > best_N:
-                best_N = child.N
-                best_actions = [a]
-            elif child.N == best_N:
-                best_actions.append(a)
-
-        # preferimos la columna central si está entre las mejores
-        if 3 in best_actions:
-            return 3
-
-        return int(best_actions[0])
+        # Si por alguna razón no se ha elegido nada antes, se selecciona simplemente la primera columna disponible como opción de reserva.
+        return int(disponibles[0])
