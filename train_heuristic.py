@@ -2,9 +2,7 @@ import json
 import math
 import random
 from datetime import datetime
-
 import numpy as np
-
 
 # =============================================================
 # ----------------- UTILIDADES DEL JUEGO ----------------------
@@ -13,13 +11,12 @@ import numpy as np
 FILAS = 6
 COLUMNAS = 7
 
-
 def movimientos_legales(tablero: np.ndarray) -> list[int]:
     ''' Se recorre la fila superior del tablero y se identifican las columnas
     cuya casilla inicial está libre, considerándolas como movimientos legales
     disponibles para jugar. '''
+    
     return [c for c in range(COLUMNAS) if tablero[0, c] == 0]
-
 
 def colocar(tablero: np.ndarray, columna: int, jugador: int) -> np.ndarray | None:
     ''' Se deja caer una ficha en la columna indicada para el jugador dado y se
@@ -30,53 +27,63 @@ def colocar(tablero: np.ndarray, columna: int, jugador: int) -> np.ndarray | Non
             nuevo = tablero.copy()
             nuevo[fila, columna] = jugador
             return nuevo
+    
     return None
-
 
 def hay_ganador(tablero: np.ndarray, jugador: int) -> bool:
     ''' Se comprueba si el jugador indicado ha conseguido conectar cuatro fichas
     consecutivas en alguna dirección (horizontal, vertical o diagonal). '''
+    
     # Se revisan todas las posibles alineaciones horizontales de cuatro fichas consecutivas.
     for f in range(FILAS):
         for c in range(COLUMNAS - 3):
             if np.all(tablero[f, c:c + 4] == jugador):
+                
                 return True
+            
     # Se revisan todas las posibles alineaciones verticales de cuatro fichas consecutivas.
     for f in range(FILAS - 3):
         for c in range(COLUMNAS):
             if np.all(tablero[f:f + 4, c] == jugador):
+                
                 return True
+            
     # Se revisan las diagonales principales con cuatro fichas consecutivas.
     for f in range(FILAS - 3):
         for c in range(COLUMNAS - 3):
             if all(tablero[f + k, c + k] == jugador for k in range(4)):
+               
                 return True
+            
     # Se revisan las diagonales secundarias con cuatro fichas consecutivas.
     for f in range(FILAS - 3):
         for c in range(COLUMNAS - 3):
             if all(tablero[f + 3 - k, c + k] == jugador for k in range(4)):
+               
                 return True
+            
     return False
-
 
 def turno_actual(tablero: np.ndarray) -> int:
     ''' Se determina de quién es el turno a partir de la paridad del número de
     fichas colocadas en el tablero: si la cantidad de fichas es par, le
     corresponde jugar al jugador -1; si es impar, le corresponde jugar al
     jugador 1. '''
-    cantidad = int(np.count_nonzero(tablero))
-    return -1 if cantidad % 2 == 0 else 1
 
+    cantidad = int(np.count_nonzero(tablero))
+
+    return -1 if cantidad % 2 == 0 else 1
 
 def codificar_estado(tablero: np.ndarray) -> str:
     ''' Se construye una representación textual del estado compatible con la
     policy, usando el formato "<jugador_que_mueve>|<tablero_aplanado>", donde
     el tablero se recorre fila por fila y cada celda se codifica como -1, 0 o 1. '''
+    
     jugador = turno_actual(tablero)
     plano = tablero.flatten()
     representacion = "".join(str(int(celda)) for celda in plano)
+    
     return f"{jugador}|{representacion}"
-
 
 # =============================================================
 # -------------- OPONENTE HEURÍSTICO MEDIUM -------------------
@@ -92,8 +99,10 @@ class HeuristicOpponentMedium:
 
     def elegir_accion(self, tablero: np.ndarray, jugador: int) -> int:
         legales = movimientos_legales(tablero)
+        
         # Se devuelve una columna por defecto si no queda ningún movimiento legal, aunque esta situación no debería ocurrir.
         if not legales:
+            
             return 0
 
         rival = -jugador
@@ -102,12 +111,14 @@ class HeuristicOpponentMedium:
         for c in legales:
             siguiente = colocar(tablero, c, jugador)
             if siguiente is not None and hay_ganador(siguiente, jugador):
+                
                 return c
 
         # Se verifica si el rival podría ganar en una jugada y se intenta bloquear esa columna.
         for c in legales:
             siguiente = colocar(tablero, c, rival)
             if siguiente is not None and hay_ganador(siguiente, rival):
+                
                 return c
 
         # Se ordenan las columnas legales según su cercanía a la columna central del tablero.
@@ -134,11 +145,11 @@ class HeuristicOpponentMedium:
                 jugadas_seguras.append(c)
 
         if jugadas_seguras:
+           
             return jugadas_seguras[0]
 
         # Si no se encuentra ninguna jugada considerada segura, se selecciona la primera columna del orden de preferencia.
         return orden_preferencia[0]
-
 
 # =============================================================
 # -------------------- Q-LEARNING TABULAR ---------------------
@@ -150,11 +161,14 @@ def epsilon_greedy(q_table: dict, estado: str, legales: list[int], epsilon: floa
     contrario, se selecciona entre las acciones legales aquella con mejor valor
     Q (explotación). Se asume que la Q-table tiene la forma:
     q_table[estado][accion] = {"Q": float, "N": int}. '''
+    
     if not legales:
+        
         return 0
 
     # Se decide explorar con probabilidad epsilon eligiendo una acción aleatoria.
     if random.random() < epsilon:
+        
         return random.choice(legales)
 
     # Se decide explotar seleccionando la acción legal con mayor valor Q.
@@ -169,11 +183,12 @@ def epsilon_greedy(q_table: dict, estado: str, legales: list[int], epsilon: floa
             mejor_accion = a
 
     if mejor_accion is not None:
+       
         return mejor_accion
 
     # Si no se tiene información aprendida para el estado, se elige una de las columnas legales de forma determinista.
+    
     return legales[0]
-
 
 def actualizar_q(
     q_table: dict,
@@ -191,6 +206,7 @@ def actualizar_q(
 
     llevando además un conteo de visitas N(s,a) para facilitar el análisis del
     proceso de aprendizaje. '''
+
     if estado not in q_table:
         q_table[estado] = {}
     if accion not in q_table[estado]:
@@ -215,7 +231,6 @@ def actualizar_q(
     # Se incrementa el número de visitas del par (estado, acción).
     q_table[estado][accion]["N"] += 1
 
-
 # =============================================================
 # ---------------------- ENTRENAMIENTO ------------------------
 # =============================================================
@@ -237,6 +252,7 @@ def jugar_episodio_qlearning(
       - la longitud de la partida medida en número total de jugadas,
       - el valor de agent_player (-1 o 1), para poder analizar el rol que tuvo
         el agente en la partida. '''
+    
     tablero = np.zeros((FILAS, COLUMNAS), dtype=int)
 
     # Se decide al azar si el agente juega como -1 o como 1 en este episodio.
@@ -312,8 +328,6 @@ def jugar_episodio_qlearning(
             # Se actualizan los estados intermedios usando recompensa 0 y bootstrap con el estado siguiente.
             siguiente_estado, _ = trayectoria[i + 1]
             # Para el estado siguiente se aproxima el conjunto de acciones legales como todas las columnas del tablero.
-            # NOTA: Se podría almacenar también el tablero en la trayectoria para recuperar exactamente el conjunto
-            # de acciones legales, pero se prefiere esta aproximación para mantener el código más simple.
             actualizar_q(
                 q_table,
                 estado,
@@ -327,13 +341,13 @@ def jugar_episodio_qlearning(
 
     return recompensa_final, num_movimientos, agent_player
 
-
 def evaluar_vs_heuristic(q_table: dict, oponente: HeuristicOpponentMedium, partidas: int = 200) -> dict:
     ''' Se evalúa el agente controlado por la Q-table frente al oponente
     heurístico, utilizando siempre una política greedy (epsilon = 0) para la
     selección de acciones. El rol del agente alterna entre -1 y 1 en cada
     partida. Se devuelven las métricas agregadas de victorias, empates,
     derrotas y el winrate resultante. '''
+    
     victorias = 0
     empates = 0
     derrotas = 0
@@ -390,7 +404,6 @@ def evaluar_vs_heuristic(q_table: dict, oponente: HeuristicOpponentMedium, parti
         "partidas_eval": total,
     }
 
-
 # =============================================================
 # ---------------------- GUARDADO MODELO ----------------------
 # =============================================================
@@ -408,6 +421,7 @@ def guardar_modelo_simple(q_table: dict, archivo: str) -> None:
     puede almacenar las acciones como diccionarios con Q y N
     (q_table[estado][accion] = {"Q": float, "N": int}) o como valores float
     directos para compatibilidad. '''
+    
     salida: dict[str, dict[str, float]] = {}
     for estado, acciones in q_table.items():
         acciones_q: dict[str, float] = {}
@@ -425,8 +439,8 @@ def guardar_modelo_simple(q_table: dict, archivo: str) -> None:
 
     print(f"\nSe guardó modelo final en '{archivo}' con {len(salida)} estados.")
 
-
 def guardar_qstats_completo(q_table: dict, archivo: str) -> None:
+   
     ''' Se guarda una versión completa de la tabla Q que incluye tanto el
     conteo de visitas N como los valores Q por acción. Este archivo no se
     utiliza en la policy de producción, pero resulta útil para análisis e
@@ -452,13 +466,14 @@ def guardar_qstats_completo(q_table: dict, archivo: str) -> None:
 
     print(f"\nSe guardó q_stats completo con N y Q en '{archivo}'.")
 
-
 def media_movil(lista: list[float], ventana: int = 50) -> list[float]:
     ''' Se calcula la media móvil simple sobre la lista de valores indicada,
     utilizando una ventana de tamaño configurable. Esta utilidad se emplea
     para suavizar las curvas de aprendizaje que se guardan en los archivos
     JSON de self-play. '''
+    
     if ventana <= 1:
+        
         return [float(x) for x in lista]
 
     salida: list[float] = []
@@ -466,8 +481,8 @@ def media_movil(lista: list[float], ventana: int = 50) -> list[float]:
         ini = max(0, i - ventana + 1)
         segmento = lista[ini:i + 1]
         salida.append(sum(segmento) / len(segmento))
+    
     return salida
-
 
 # =============================================================
 # -------------------------- MAIN -----------------------------
@@ -554,9 +569,7 @@ if __name__ == "__main__":
                 f"D={resultado_eval['derrotas']})"
             )
 
-    # ---------------------------------------------------------
     # Se guarda el modelo final en el formato utilizado por la policy.
-    # ---------------------------------------------------------
     guardar_modelo_simple(q_table, "connect4_model.json")
 
     # Se guarda una copia histórica del modelo final (solo valores Q).
@@ -567,9 +580,7 @@ if __name__ == "__main__":
     archivo_qstats_completo = f"qstats_completo_{run_id}.json"
     guardar_qstats_completo(q_table, archivo_qstats_completo)
 
-    # ---------------------------------------------------------
     # Se construye y guarda la curva de aprendizaje frente al oponente heurístico.
-    # ---------------------------------------------------------
     curva = {
         "metadata": {
             "run_id": run_id,
@@ -586,9 +597,6 @@ if __name__ == "__main__":
     with open(archivo_curva, "w", encoding="utf-8") as f:
         json.dump(curva, f, indent=2)
 
-    # ---------------------------------------------------------
-    # Se guardan estadísticas detalladas de self-play episodio a episodio.
-    # ---------------------------------------------------------
     # Se calcula un resumen global de victorias, empates y derrotas desde el punto de vista del agente.
     victorias_sp = sum(1 for r in recompensas_episodios if r > 0)
     derrotas_sp = sum(1 for r in recompensas_episodios if r < 0)
