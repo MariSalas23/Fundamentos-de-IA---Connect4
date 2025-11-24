@@ -55,9 +55,11 @@ Existen otros archivos como train_UCB.py que son archivos para entrenar a nuestr
 ### Dependencias para validaciones
 
 - Matplotlib
-bash
+```bash
 pip install matplotlib
+```
 
 - Seaborn (para el mapa de calor)
-bash
+```bash
 pip install seaborn
+```
