@@ -71,39 +71,61 @@ class PolicyHeatmapAnalyzer:
         """
         print(f"\n Analizando preferencias por columna ({n_games} partidas)...")
         
-        LearningPolicy = self.participants[self.learner_name]
+        # Clase de tu agente que aprende
+        LearningPolicyCls = self.participants[self.learner_name]
         
-        # Elegir oponente
+        # ===================== Elegir oponente =====================
         if opponent_name and opponent_name in self.participants:
-            OpponentPolicy = self.participants[opponent_name]
+            # Si se pasa un nombre de oponente válido, se usa ese agente
+            OpponentPolicyCls = self.participants[opponent_name]
             print(f"   Oponente: {opponent_name}")
         else:
-            # Crear una política aleatoria simple
-            class RandomPolicy(Policy):
+            # Crear una política aleatoria simple como oponente por defecto
+            class RandomOpponent(Policy):
+                def mount(self, time_out: float | None = None) -> None:
+                    # No necesitamos inicializar nada especial para la política aleatoria
+                    pass
+
                 def act(self, board):
-                    state = ConnectState()
-                    state.board = board.copy()
-                    valid = state.get_valid_actions()
-                    return np.random.choice(valid)
-            OpponentPolicy = RandomPolicy
+                    """
+                    Oponente aleatorio:
+                    - 'board' es un np.ndarray de tamaño (6, 7)
+                    - Columnas válidas: aquellas donde la fila superior (fila 0) está vacía (== 0)
+                    """
+                    num_columnas = board.shape[1]
+                    columnas_validas = [c for c in range(num_columnas) if board[0, c] == 0]
+
+                    # Por seguridad, si no hay columnas válidas, devolvemos 0
+                    if not columnas_validas:
+                        return 0
+
+                    return int(np.random.choice(columnas_validas))
+            
+            OpponentPolicyCls = RandomOpponent
             print(f"   Oponente: Random")
         
+        # ===================== Simulación de partidas =====================
         for game in range(n_games):
-            learner = LearningPolicy()
+            # Instanciamos el agente que estamos analizando
+            learner = LearningPolicyCls()
             learner.mount()
             
-            opponent = OpponentPolicy()
+            # Instanciamos el oponente (otro agente o el aleatorio)
+            opponent = OpponentPolicyCls()
             opponent.mount()
             
             state = ConnectState()
-            first_move = None
+            first_move = None  # Para registrar la columna de apertura
             
+            # Se juega una partida completa hasta llegar a un estado final
             while not state.is_final():
                 if state.player == -1:
+                    # Turno del agente que estamos analizando
                     action = learner.act(state.board)
                     if first_move is None:
                         first_move = int(action)
                 else:
+                    # Turno del oponente
                     action = opponent.act(state.board)
                 
                 state = state.transition(int(action))

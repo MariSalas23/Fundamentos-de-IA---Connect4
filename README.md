@@ -9,7 +9,7 @@ La política final del agente combina tres componentes para tomar decisiones óp
 
 ## Requisitos
 ### Entorno
-- *Python:* Versión 3.8 o superior.
+- *Python:* Versión 3.13.1 o superior.
 - *SO:* Compatible con Windows, macOS o Linux.
 
 ### Dependencias principales

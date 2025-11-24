@@ -1,0 +1,34 @@
+{
+    "MCTS": {
+        "como_rojo": {
+            "ganadas": 16,
+            "perdidas": 9,
+            "empates": 0,
+            "total": 25,
+            "winrate": 0.64
+        },
+        "como_amarillo": {
+            "ganadas": 14,
+            "perdidas": 10,
+            "empates": 1,
+            "total": 25,
+            "winrate": 0.56
+        }
+    },
+    "CETINA": {
+        "como_rojo": {
+            "ganadas": 25,
+            "perdidas": 0,
+            "empates": 0,
+            "total": 25,
+            "winrate": 1.0
+        },
+        "como_amarillo": {
+            "ganadas": 25,
+            "perdidas": 0,
+            "empates": 0,
+            "total": 25,
+            "winrate": 1.0
+        }
+    }
+}
