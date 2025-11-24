@@ -31,18 +31,18 @@ La política final del agente combina tres componentes para tomar decisiones óp
 ### Clonación del repositorio
 
 Clona el repositorio en tu máquina local:
-bash
+```bash
 git clone https://github.com/MariSalas23/Fundamentos-de-IA---Connect4.git
 cd Fundamentos-de-IA---Connect4
-
+```
 
 ### Instalación de dependencias para usar policy.py
 
 Se debe ejecutar el siguiente comando:
 
-bash
+```bash
 pip install numpy
-
+```
 
 *Los archivos *policy.py y connect4_model.json son los únicos que se requieren para competir con nuestro agente entrenado**
 
